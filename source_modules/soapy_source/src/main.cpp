@@ -205,6 +205,9 @@ private:
 
         hasAgc = dev->hasGainMode(SOAPY_SDR_RX, channelId);
 
+        streamArgsInfo = dev->getStreamArgsInfo(SOAPY_SDR_RX, channelId);
+        streamArgIds = std::vector<int>(streamArgsInfo.size(), 0);
+
         SoapySDR::Device::unmake(dev);
 
         config.acquire();
@@ -326,7 +329,14 @@ private:
 
         _this->dev->setFrequency(SOAPY_SDR_RX, _this->channelId, _this->freq);
 
-        _this->devStream = _this->dev->setupStream(SOAPY_SDR_RX, "CF32");
+        SoapySDR::Kwargs streamArgs;
+        for (int i = 0; i < _this->streamArgsInfo.size(); i++) {
+            auto& arg = _this->streamArgsInfo[i];
+            auto& id = _this->streamArgIds[i];
+            if (arg.options.empty()) continue;
+            streamArgs.emplace(arg.key, arg.options[id]);
+        }
+        _this->devStream = _this->dev->setupStream(SOAPY_SDR_RX, "CF32", {}, streamArgs);
         _this->dev->activateStream(_this->devStream);
         _this->running = true;
         _this->workerThread = std::thread(_worker, _this);
@@ -466,6 +476,25 @@ private:
                 _this->saveCurrent();
             }
         }
+
+        static auto vectorGetter = [](void* vec, int idx, const char** out_text)
+        {
+            auto& vector = *static_cast<std::vector<std::string>*>(vec);
+            if (idx < 0 || idx >= static_cast<int>(vector.size())) { return false; }
+            *out_text = vector.at(idx).c_str();
+            return true;
+        };
+
+        if (_this->running) { style::beginDisabled(); }
+        for (int i = 0; i < _this->streamArgsInfo.size(); i++) {
+            auto& arg = _this->streamArgsInfo[i];
+            auto& id = _this->streamArgIds[i];
+            if (arg.options.empty()) continue;
+            ImGui::LeftLabel(arg.name.c_str());
+            ImGui::SetNextItemWidth(menuWidth - ImGui::GetCursorPosX());
+            ImGui::Combo(("##_stream_arg_" + arg.key + "_" + _this->name).c_str(), &id, vectorGetter, &arg.optionNames, arg.optionNames.size());
+        }
+        if (_this->running) { style::endDisabled(); }
     }
 
     static void _worker(SoapyModule* _this) {
@@ -512,6 +541,8 @@ private:
     int uiBandwidthId = 0;
     std::vector<float> bandwidthList;
     std::string txtBwList;
+    SoapySDR::ArgInfoList streamArgsInfo;
+    std::vector<int> streamArgIds;
 };
 
 MOD_EXPORT void _INIT_() {
